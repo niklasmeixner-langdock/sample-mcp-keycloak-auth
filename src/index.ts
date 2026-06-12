@@ -237,79 +237,85 @@ async function getKeycloakUserInfo(keycloakToken: string): Promise<any> {
 
 // --- MCP Server ---
 
-const mcpServer = new Server(
-  { name: "sample-mcp-keycloak-auth", version: "1.0.0" },
-  { capabilities: { tools: {} } }
-);
+// One Server instance per session: the SDK allows only a single transport
+// per Server, so sharing a global instance breaks on the second session.
+function createMcpServer(): Server {
+  const mcpServer = new Server(
+    { name: "sample-mcp-keycloak-auth", version: "1.0.0" },
+    { capabilities: { tools: {} } }
+  );
 
-mcpServer.setRequestHandler(
-  ListToolsRequestSchema,
-  async () => ({
-    tools: [
-      {
-        name: "get-current-user",
-        description:
-          "Get information about the currently authenticated Keycloak user",
-        inputSchema: { type: "object" as const, properties: {} },
-      },
-    ],
-  })
-);
+  mcpServer.setRequestHandler(
+    ListToolsRequestSchema,
+    async () => ({
+      tools: [
+        {
+          name: "get-current-user",
+          description:
+            "Get information about the currently authenticated Keycloak user",
+          inputSchema: { type: "object" as const, properties: {} },
+        },
+      ],
+    })
+  );
 
-mcpServer.setRequestHandler(
-  CallToolRequestSchema,
-  async (request, extra) => {
-    if (request.params.name === "get-current-user") {
-      try {
-        const authInfo = extra.authInfo;
-        if (!authInfo) {
-          throw new Error("Not authenticated");
-        }
-        const stored = activeTokens.get(authInfo.token);
-        if (!stored) {
-          throw new Error("No Keycloak token found for this session");
-        }
+  mcpServer.setRequestHandler(
+    CallToolRequestSchema,
+    async (request, extra) => {
+      if (request.params.name === "get-current-user") {
+        try {
+          const authInfo = extra.authInfo;
+          if (!authInfo) {
+            throw new Error("Not authenticated");
+          }
+          const stored = activeTokens.get(authInfo.token);
+          if (!stored) {
+            throw new Error("No Keycloak token found for this session");
+          }
 
-        const profile = await getKeycloakUserInfo(stored.keycloakAccessToken);
+          const profile = await getKeycloakUserInfo(stored.keycloakAccessToken);
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  success: true,
-                  user: {
-                    sub: profile.sub,
-                    name: profile.name,
-                    email: profile.email,
-                    email_verified: profile.email_verified,
-                    preferred_username: profile.preferred_username,
-                    given_name: profile.given_name,
-                    family_name: profile.family_name,
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(
+                  {
+                    success: true,
+                    user: {
+                      sub: profile.sub,
+                      name: profile.name,
+                      email: profile.email,
+                      email_verified: profile.email_verified,
+                      preferred_username: profile.preferred_username,
+                      given_name: profile.given_name,
+                      family_name: profile.family_name,
+                    },
                   },
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          ],
-        };
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        } catch (error) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+          };
+        }
       }
-    }
 
-    throw new Error(`Unknown tool: ${request.params.name}`);
-  }
-);
+      throw new Error(`Unknown tool: ${request.params.name}`);
+    }
+  );
+
+  return mcpServer;
+}
 
 // --- HTTP Server ---
 
@@ -500,7 +506,7 @@ async function main() {
           }
         };
 
-        await mcpServer.connect(transport);
+        await createMcpServer().connect(transport);
       }
 
       await transport.handleRequest(req, res, req.body);
