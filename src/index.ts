@@ -331,9 +331,14 @@ async function main() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Request logging
-  app.use((req: Request, _res: Response, next: NextFunction) => {
+  // Request logging (status code logged when the response finishes)
+  app.use((req: Request, res: Response, next: NextFunction) => {
     console.log(`${req.method} ${req.path}`, req.method === "GET" ? req.query : "");
+    res.on("finish", () => {
+      if (res.statusCode >= 400) {
+        console.log(`${req.method} ${req.path} -> ${res.statusCode}`);
+      }
+    });
     next();
   });
 
